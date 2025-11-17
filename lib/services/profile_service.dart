@@ -8,7 +8,6 @@ class ProfileService extends ChangeNotifier {
   final SupabaseClient _client = SupabaseConfig.client;
   final StorageService _storageService = StorageService();
   Map<String, dynamic>? _currentProfile;
-  String? _currentImageUrl;
 
   Map<String, dynamic>? get currentProfile => _currentProfile;
 
@@ -65,8 +64,13 @@ class ProfileService extends ChangeNotifier {
     }
   }
 
-  Future<String> uploadAvatar(Uint8List imageBytes, String filename) async {
-    return await _storageService.uploadMessageImage(imageBytes, filename);
+  Future<String?> _uploadAvatar(Uint8List imageBytes, String filename) async {
+    try {
+      return await _storageService.uploadAvatar(imageBytes, filename);
+    } catch (e) {
+      print('❌ Erro ao fazer upload do avatar: $e');
+      return null;
+    }
   }
 
   Future<void> updateProfile(String fullName, Uint8List? imageBytes) async {
@@ -74,22 +78,41 @@ class ProfileService extends ChangeNotifier {
       final userId = _client.auth.currentUser!.id;
       String? avatarUrl;
 
+      // Upload da imagem se existir
       if (imageBytes != null) {
-        avatarUrl = await _storageService.uploadMessageImage(
+        avatarUrl = await _uploadAvatar(
           imageBytes, 
           'avatar_$userId.jpg'
         );
+        
+        if (avatarUrl == null) {
+          throw Exception('Falha no upload da imagem');
+        }
+        
+        print('📸 Avatar URL gerada: $avatarUrl');
       }
 
-      await _client.from('profiles').upsert({
+      // Atualizar perfil no banco
+      final updates = {
         'id': userId,
         'full_name': fullName,
-        'avatar_url': avatarUrl,
         'online': true,
         'updated_at': DateTime.now().toIso8601String(),
-      });
+      };
 
+      // Adicionar avatar_url apenas se foi feito upload
+      if (avatarUrl != null) {
+        updates['avatar_url'] = avatarUrl;
+      }
+
+      final response = await _client.from('profiles').upsert(updates);
+
+      print('📊 Resposta do upsert: $response');
+
+      // Recarregar perfil atualizado
       _currentProfile = await getCurrentProfile();
+      
+      print('🔄 Perfil após atualização: $_currentProfile');
       notifyListeners();
       
       print('✅ Perfil atualizado com sucesso');
@@ -111,5 +134,11 @@ class ProfileService extends ChangeNotifier {
     } catch (e) {
       print('❌ Erro ao atualizar status online: $e');
     }
+  }
+
+  // Método para forçar recarregamento do perfil
+  Future<void> refreshProfile() async {
+    _currentProfile = await getCurrentProfile();
+    notifyListeners();
   }
 }

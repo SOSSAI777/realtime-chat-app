@@ -1,51 +1,88 @@
 import 'dart:typed_data';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../core/supabase_config.dart';
 
 class StorageService {
-  final SupabaseClient _client = Supabase.instance.client;
+  final SupabaseClient _client = SupabaseConfig.client;
 
-  Future<String> uploadMessageImage(Uint8List bytes, String filename) async {
+  // Upload de avatar para o bucket 'avatars'
+  Future<String> uploadAvatar(Uint8List imageBytes, String filename) async {
     try {
-      // Verificar se usuário está autenticado
-      if (_client.auth.currentUser == null) {
-        throw Exception('Usuário não autenticado');
+      print('📤 Iniciando upload do avatar: $filename');
+      
+      // Verificar se o bucket existe
+      try {
+        await _client.storage.from('avatars').list();
+      } catch (e) {
+        print('❌ Bucket avatars não encontrado: $e');
+        throw Exception('Bucket avatars não configurado. Configure no Supabase Dashboard.');
       }
+      
+      // Fazer upload
+      final uploadResponse = await _client.storage
+          .from('avatars')
+          .uploadBinary(
+            filename, 
+            imageBytes,
+            fileOptions: FileOptions(
+              upsert: true, // Sobrescrever se já existir
+              contentType: 'image/jpeg',
+            ),
+          );
 
-      final String finalFilename =
-          '${DateTime.now().millisecondsSinceEpoch}_${_sanitizeFilename(filename)}';
+      print('✅ Upload realizado com sucesso');
 
-      // ✅ CORREÇÃO: Usar uploadBinary para Uint8List
-      await _client.storage
-          .from('message-images')
-          .uploadBinary(finalFilename, bytes);
+      // Obter URL pública
+      final imageUrl = _client.storage
+          .from('avatars')
+          .getPublicUrl(filename);
 
-      final publicUrl =
-          _client.storage.from('message-images').getPublicUrl(finalFilename);
+      print('🔗 URL pública: $imageUrl');
 
-      return publicUrl;
+      return imageUrl;
     } catch (e) {
+      print('❌ Erro no upload do avatar: $e');
       rethrow;
     }
   }
 
-  String _getMimeType(String filename) {
-    if (filename.toLowerCase().endsWith('.png')) return 'image/png';
-    if (filename.toLowerCase().endsWith('.jpg') ||
-        filename.toLowerCase().endsWith('.jpeg')) return 'image/jpeg';
-    if (filename.toLowerCase().endsWith('.gif')) return 'image/gif';
-    return 'image/jpeg';
-  }
-
-  String _sanitizeFilename(String filename) {
-    return filename.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
-  }
-
-  Future<void> ensureBucketReady() async {
+  // Upload de imagens de mensagens
+  Future<String> uploadMessageImage(Uint8List imageBytes, String filename) async {
     try {
-      await _client.storage.from('message-images').list();
+      final uploadResponse = await _client.storage
+          .from('message_images')
+          .uploadBinary(
+            filename, 
+            imageBytes,
+            fileOptions: FileOptions(
+              upsert: true,
+              contentType: 'image/jpeg',
+            ),
+          );
+
+      final imageUrl = _client.storage
+          .from('message_images')
+          .getPublicUrl(filename);
+
+      return imageUrl;
     } catch (e) {
-      throw Exception(
-          'Bucket message-images não está configurado corretamente: $e');
+      print('❌ Erro no upload da imagem: $e');
+      rethrow;
     }
   }
+
+  // Método para deletar avatar (opcional)
+  Future<void> deleteAvatar(String filename) async {
+    try {
+      await _client.storage
+          .from('avatars')
+          .remove([filename]);
+      print('✅ Avatar deletado: $filename');
+    } catch (e) {
+      print('❌ Erro ao deletar avatar: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> ensureBucketReady() async {}
 }

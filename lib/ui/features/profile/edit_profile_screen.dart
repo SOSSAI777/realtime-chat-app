@@ -18,6 +18,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Uint8List? _imageBytes;
   bool _isLoading = false;
   bool _isInitialized = false;
+  String? _currentAvatarUrl;
 
   @override
   void initState() {
@@ -33,6 +34,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       if (profile != null) {
         setState(() {
           _nameController.text = profile['full_name'] ?? '';
+          _currentAvatarUrl = profile['avatar_url'];
           _isInitialized = true;
         });
       }
@@ -52,6 +54,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         final bytes = await image.readAsBytes();
         setState(() {
           _imageBytes = bytes;
+          // Limpar a URL atual quando selecionar nova imagem
+          _currentAvatarUrl = null;
         });
       }
     } catch (e) {
@@ -78,8 +82,16 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         _imageBytes
       );
       
+      // Forçar refresh do perfil em toda a app
+      await profileService.refreshProfile();
+      
       _showSnackbar('Perfil atualizado com sucesso!', isError: false);
-      Navigator.pop(context);
+      
+      // Aguardar um pouco para mostrar o feedback
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      Navigator.pop(context, true); // Retornar true indica que houve atualização
+      
     } catch (e) {
       _showSnackbar('Erro ao salvar perfil: $e');
     } finally {
@@ -94,8 +106,18 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       SnackBar(
         content: Text(message),
         backgroundColor: isError ? Colors.red : Colors.green,
+        duration: const Duration(seconds: 3),
       ),
     );
+  }
+
+  ImageProvider? _getAvatarImage() {
+    if (_imageBytes != null) {
+      return MemoryImage(_imageBytes!);
+    } else if (_currentAvatarUrl != null && _currentAvatarUrl!.isNotEmpty) {
+      return NetworkImage(_currentAvatarUrl!);
+    }
+    return null;
   }
 
   @override
@@ -131,12 +153,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       children: [
                         CircleAvatar(
                           radius: 50,
-                          backgroundImage: _imageBytes != null
-                              ? MemoryImage(_imageBytes!)
-                              : (user?.userMetadata?['avatar_url'] != null
-                                  ? NetworkImage(user!.userMetadata!['avatar_url'] as String)
-                                  : null) as ImageProvider?,
-                          child: _imageBytes == null && user?.userMetadata?['avatar_url'] == null
+                          backgroundImage: _getAvatarImage(),
+                          child: _getAvatarImage() == null
                               ? const Icon(Icons.person, size: 40, color: Colors.white)
                               : null,
                         ),
@@ -188,7 +206,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         ),
                       ),
                       child: _isLoading
-                          ? const  SizedBox(
+                          ? const SizedBox(
                               width: 20,
                               height: 20,
                               child: CircularProgressIndicator(

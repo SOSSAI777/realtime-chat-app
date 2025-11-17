@@ -197,7 +197,7 @@ class ChatService extends ChangeNotifier {
     try {
       print('📤 Iniciando envio de imagem...');
 
-      // ✅ CORREÇÃO: Converter para Uint8List regular se necessário
+      
       final Uint8List bytes = Uint8List.fromList(imageBytes);
 
       // Verificar se o bucket está pronto antes do upload
