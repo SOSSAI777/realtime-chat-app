@@ -1,0 +1,27 @@
+name: TalkOn
+description: Aplicativo de chat em tempo real com Flutter e Supabase
+
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  supabase_flutter: ^2.1.2
+  provider: ^6.1.1
+  image_picker: ^1.0.4
+  uuid: ^4.2.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/logos/
