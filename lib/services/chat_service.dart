@@ -147,16 +147,16 @@ class ChatService extends ChangeNotifier {
               }
 
               return Message(
-                id: map['id'] as String,
-                conversationId: map['conversation_id'] as String,
-                senderId: map['sender_id'] as String,
-                content: content,
-                type: type,
-                createdAt: createdAt,
-                reactions: reactions,
-                isEdited: map['is_edited'] as bool? ?? false,
-                isDeleted: map['is_deleted'] as bool? ?? false,
-              );
+  id: map['id'] as String,
+  conversationId: map['conversation_id'] as String,
+  senderId: map['sender_id'] as String,
+  content: content,
+  type: type,
+  createdAt: createdAt,
+  reactions: reactions,
+  isEdited: map['is_edited'] as bool? ?? false,
+  isDeleted: map['is_deleted'] as bool? ?? false,
+);
             }));
 
             return messagesWithReactions;

@@ -57,13 +57,16 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  Future<void> sendPasswordResetEmail(String email) async {
-    try {
-      await _client.auth.resetPasswordForEmail(email);
-      print('✅ Link de redefinição enviado para: $email');
-    } catch (e) {
-      print('❌ Erro ao enviar email de redefinição: $e');
-      rethrow;
-    }
+Future<void> sendPasswordResetEmail(String email) async {
+  try {
+    await _client.auth.resetPasswordForEmail(
+      email,
+      redirectTo: 'yourapp://reset-password', // ADICIONE ESTA LINHA
+    );
+    print('✅ Link de redefinição enviado para: $email');
+  } catch (e) {
+    print('❌ Erro ao enviar email de redefinição: $e');
+    rethrow;
   }
+}
 }

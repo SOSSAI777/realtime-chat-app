@@ -74,53 +74,61 @@ class ProfileService extends ChangeNotifier {
   }
 
   Future<void> updateProfile(String fullName, Uint8List? imageBytes) async {
-    try {
-      final userId = _client.auth.currentUser!.id;
-      String? avatarUrl;
+  try {
+    final userId = _client.auth.currentUser!.id;
+    String? avatarUrl;
 
-      // Upload da imagem se existir
-      if (imageBytes != null) {
-        avatarUrl = await _uploadAvatar(
-          imageBytes, 
-          'avatar_$userId.jpg'
-        );
-        
-        if (avatarUrl == null) {
-          throw Exception('Falha no upload da imagem');
-        }
-        
-        print('📸 Avatar URL gerada: $avatarUrl');
-      }
-
-      // Atualizar perfil no banco
-      final updates = {
-        'id': userId,
-        'full_name': fullName,
-        'online': true,
-        'updated_at': DateTime.now().toIso8601String(),
-      };
-
-      // Adicionar avatar_url apenas se foi feito upload
-      if (avatarUrl != null) {
-        updates['avatar_url'] = avatarUrl;
-      }
-
-      final response = await _client.from('profiles').upsert(updates);
-
-      print('📊 Resposta do upsert: $response');
-
-      // Recarregar perfil atualizado
-      _currentProfile = await getCurrentProfile();
+    // Upload da imagem se existir
+    if (imageBytes != null) {
+      avatarUrl = await _uploadAvatar(
+        imageBytes, 
+        'avatar_${userId}_${DateTime.now().millisecondsSinceEpoch}.jpg' // 🔥 ADD TIMESTAMP
+      );
       
-      print('🔄 Perfil após atualização: $_currentProfile');
-      notifyListeners();
+      if (avatarUrl == null) {
+        throw Exception('Falha no upload da imagem');
+      }
       
-      print('✅ Perfil atualizado com sucesso');
-    } catch (e) {
-      print('❌ Erro ao atualizar perfil: $e');
-      rethrow;
+      // 🔥 ADICIONE TIMESTAMP PARA EVITAR CACHE
+      avatarUrl = '$avatarUrl?t=${DateTime.now().millisecondsSinceEpoch}';
+      
+      print('📸 Avatar URL gerada: $avatarUrl');
     }
+
+    // Atualizar perfil no banco
+    final updates = {
+      'id': userId,
+      'full_name': fullName,
+      'online': true,
+      'updated_at': DateTime.now().toIso8601String(),
+    };
+
+    // Adicionar avatar_url apenas se foi feito upload
+    if (avatarUrl != null) {
+      updates['avatar_url'] = avatarUrl;
+    }
+
+    final response = await _client.from('profiles').upsert(updates);
+
+    print('📊 Resposta do upsert: $response');
+
+    // 🔥 FORÇAR RECARREGAMENTO COMPLETO
+    await Future.delayed(Duration(milliseconds: 100)); // Pequena pausa
+    _currentProfile = await getCurrentProfile();
+    
+    print('🔄 Perfil após atualização: $_currentProfile');
+    
+    // 🔥 NOTIFICAR MÚLTIPLAS VEZES PARA GARANTIR
+    notifyListeners();
+    await Future.delayed(Duration(milliseconds: 50));
+    notifyListeners();
+    
+    print('✅ Perfil atualizado com sucesso');
+  } catch (e) {
+    print('❌ Erro ao atualizar perfil: $e');
+    rethrow;
   }
+}
 
   Future<void> setUserOnline(bool online) async {
     try {

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../models/message_model.dart';
+import '../../services/profile_service.dart';
 
 class MessageBubble extends StatelessWidget {
   final Message message;
@@ -16,9 +18,53 @@ class MessageBubble extends StatelessWidget {
   });
 
   String _formatTime(DateTime date) {
-    // ✅ CORREÇÃO: Converter para horário local e formatar como HH:MM
     final localDate = date.toLocal();
     return '${localDate.hour.toString().padLeft(2, '0')}:${localDate.minute.toString().padLeft(2, '0')}';
+  }
+
+  // 🔥 MÉTODO SIMPLIFICADO PARA AVATAR DO REMETENTE
+  Widget _buildSenderAvatar() {
+    return CircleAvatar(
+      radius: 16,
+      backgroundColor: Colors.blue.shade500,
+      child: const Text(
+        'U',
+        style: TextStyle(color: Colors.white, fontSize: 12),
+      ),
+    );
+  }
+
+  // 🔥 MÉTODO SIMPLIFICADO PARA SEU AVATAR
+  Widget _buildMyAvatar(BuildContext context) {
+    return Consumer<ProfileService>(
+      builder: (context, profileService, child) {
+        final myProfile = profileService.currentProfile;
+        final myAvatarUrl = myProfile?['avatar_url'];
+        
+        // Se tem sua foto de perfil, usa ela
+        if (myAvatarUrl != null && myAvatarUrl.isNotEmpty) {
+          return CircleAvatar(
+            radius: 16,
+            backgroundImage: NetworkImage(
+              '$myAvatarUrl?t=${DateTime.now().millisecondsSinceEpoch}'
+            ),
+            onBackgroundImageError: (exception, stackTrace) {
+              // Fallback se a imagem não carregar
+            },
+          );
+        }
+        
+        // Fallback: avatar com "Eu"
+        return CircleAvatar(
+          radius: 16,
+          backgroundColor: Colors.green.shade500,
+          child: const Text(
+            'Eu',
+            style: TextStyle(color: Colors.white, fontSize: 10),
+          ),
+        );
+      },
+    );
   }
 
   Widget _buildMessageContent() {
@@ -39,7 +85,6 @@ class MessageBubble extends StatelessWidget {
       );
     }
 
-    // ✅ CORREÇÃO: Código completo para imagens
     if (message.type == 'image' || _isImageUrl(message.content)) {
       return _buildImageContent();
     }
@@ -69,7 +114,6 @@ class MessageBubble extends StatelessWidget {
     );
   }
 
-  // ✅ NOVO: Verificar se é uma URL de imagem
   bool _isImageUrl(String content) {
     return content.startsWith('http') &&
         !content.startsWith('data:') &&
@@ -79,7 +123,6 @@ class MessageBubble extends StatelessWidget {
             content.contains('.gif'));
   }
 
-  // ✅ NOVO: Método separado para conteúdo de imagem
   Widget _buildImageContent() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -115,8 +158,6 @@ class MessageBubble extends StatelessWidget {
                 );
               },
               errorBuilder: (context, error, stackTrace) {
-                print('❌ Erro ao carregar imagem: $error');
-                print('📁 URL: ${message.content}');
                 return Container(
                   width: 250,
                   height: 250,
@@ -133,25 +174,6 @@ class MessageBubble extends StatelessWidget {
                         style: TextStyle(
                           color: isMine ? Colors.white70 : Colors.grey,
                           fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      ElevatedButton(
-                        onPressed: () {
-                          // Tentar recarregar a imagem
-                          // Você pode implementar um retry mechanism aqui
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: isMine ? Colors.blue : Colors.grey,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 4),
-                        ),
-                        child: Text(
-                          'Tentar novamente',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: isMine ? Colors.white : Colors.black,
-                          ),
                         ),
                       ),
                     ],
@@ -180,7 +202,6 @@ class MessageBubble extends StatelessWidget {
   Widget _buildReactions() {
     if (message.reactions.isEmpty) return const SizedBox();
 
-    // Agrupar reações por emoji
     final reactionCounts = <String, int>{};
     for (final reaction in message.reactions) {
       reactionCounts[reaction.emoji] =
@@ -260,14 +281,7 @@ class MessageBubble extends StatelessWidget {
             isMine ? MainAxisAlignment.end : MainAxisAlignment.start,
         children: [
           if (!isMine) ...[
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: Colors.blue.shade500,
-              child: Text(
-                'U',
-                style: TextStyle(color: Colors.white, fontSize: 12),
-              ),
-            ),
+            _buildSenderAvatar(),
             const SizedBox(width: 8),
           ],
           Flexible(
@@ -301,14 +315,7 @@ class MessageBubble extends StatelessWidget {
           ),
           if (isMine) ...[
             const SizedBox(width: 8),
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: Colors.green.shade500,
-              child: Text(
-                'Eu',
-                style: TextStyle(color: Colors.white, fontSize: 10),
-              ),
-            ),
+            _buildMyAvatar(context),
           ],
         ],
       ),
