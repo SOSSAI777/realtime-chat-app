@@ -6,6 +6,7 @@ import '../core/supabase_config.dart';
 import '../models/message_model.dart';
 import 'storage_service.dart';
 import 'package:uuid/uuid.dart';
+import '../models/user_models.dart';
 
 class ChatService extends ChangeNotifier {
   final SupabaseClient _client = SupabaseConfig.client;
@@ -26,7 +27,6 @@ class ChatService extends ChangeNotifier {
     ''')
           .eq('conversation_id', conversationId)
           .order('created_at', ascending: true);
-      ;
 
       final data = res;
       print('📨 ${data.length} mensagens encontradas');
@@ -147,16 +147,16 @@ class ChatService extends ChangeNotifier {
               }
 
               return Message(
-  id: map['id'] as String,
-  conversationId: map['conversation_id'] as String,
-  senderId: map['sender_id'] as String,
-  content: content,
-  type: type,
-  createdAt: createdAt,
-  reactions: reactions,
-  isEdited: map['is_edited'] as bool? ?? false,
-  isDeleted: map['is_deleted'] as bool? ?? false,
-);
+                id: map['id'] as String,
+                conversationId: map['conversation_id'] as String,
+                senderId: map['sender_id'] as String,
+                content: content,
+                type: type,
+                createdAt: createdAt,
+                reactions: reactions,
+                isEdited: map['is_edited'] as bool? ?? false,
+                isDeleted: map['is_deleted'] as bool? ?? false,
+              );
             }));
 
             return messagesWithReactions;
@@ -165,6 +165,28 @@ class ChatService extends ChangeNotifier {
       print('❌ Erro GERAL na subscription: $e');
       return Stream.value([]);
     }
+  }
+
+  Stream<List<AppUser>> participantsStream(String conversationId) {
+    final stream = _client
+        .from('participants')
+        .stream(primaryKey: ['id']).eq('conversation_id', conversationId);
+
+    return stream.asyncMap((rows) async {
+      final users = await Future.wait(
+        rows.map((p) async {
+          final data = await _client
+              .from('profiles')
+              .select()
+              .eq('id', p['user_id'])
+              .maybeSingle();
+
+          return AppUser.fromMap(data!);
+        }),
+      );
+
+      return users;
+    });
   }
 
   Future<void> sendTextMessage(
@@ -197,7 +219,6 @@ class ChatService extends ChangeNotifier {
     try {
       print('📤 Iniciando envio de imagem...');
 
-      
       final Uint8List bytes = Uint8List.fromList(imageBytes);
 
       // Verificar se o bucket está pronto antes do upload
@@ -223,23 +244,188 @@ class ChatService extends ChangeNotifier {
     }
   }
 
+  Future<void> addUserToGroup(String conversationId, String userId) async {
+    try {
+      // ✅ CORREÇÃO: Verifica se usuário já está no grupo
+      final isAlreadyInGroup = await isUserInGroup(conversationId, userId);
+      if (isAlreadyInGroup) {
+        print('⚠️ Usuário $userId já está no grupo $conversationId');
+        return;
+      }
+
+      await _client.from('participants').insert({
+        'id': _uuid.v4(),
+        'conversation_id': conversationId,
+        'user_id': userId,
+        'joined_at': DateTime.now().toUtc().toIso8601String(),
+      });
+
+      print('✅ Usuário $userId adicionado ao grupo $conversationId');
+    } catch (e) {
+      // ✅ CORREÇÃO: Trata erro de duplicação silenciosamente
+      if (e.toString().contains('duplicate key')) {
+        print('⚠️ Usuário $userId já está no grupo (erro capturado)');
+        return;
+      }
+      print("❌ Erro ao adicionar usuário ao grupo: $e");
+      throw Exception("Erro ao adicionar usuário ao grupo");
+    }
+  }
+
+  Future<void> addMembersToGroup(
+      String conversationId, List<String> userIds) async {
+    try {
+      print(
+          '👥 Adicionando ${userIds.length} membros ao grupo: $conversationId');
+
+      for (final userId in userIds) {
+        try {
+          // ✅ CORREÇÃO: Verifica se usuário já está no grupo
+          final isAlreadyInGroup = await isUserInGroup(conversationId, userId);
+          if (!isAlreadyInGroup) {
+            await _client.from('participants').insert({
+              'id': _uuid.v4(),
+              'conversation_id': conversationId,
+              'user_id': userId,
+              'joined_at': DateTime.now().toUtc().toIso8601String(),
+            });
+            print('✅ Usuário $userId adicionado');
+          } else {
+            print('⚠️ Usuário $userId já está no grupo');
+          }
+        } catch (e) {
+          // Ignora erro de duplicação
+          if (e.toString().contains('duplicate key')) {
+            print('⚠️ Usuário $userId já está no grupo');
+            continue;
+          }
+          rethrow;
+        }
+      }
+
+      // Envia mensagem apenas se novos usuários foram adicionados
+      final currentUserId = _client.auth.currentUser!.id;
+      final newUsersCount = userIds.length;
+
+      if (newUsersCount > 0) {
+        if (newUsersCount == 1) {
+          await sendTextMessage(conversationId, currentUserId,
+              'Novo membro adicionado ao grupo! 👋');
+        } else {
+          await sendTextMessage(conversationId, currentUserId,
+              '$newUsersCount novos membros adicionados ao grupo! 👥');
+        }
+      }
+
+      print('✅ Operação de adição de membros concluída');
+    } catch (e) {
+      print('❌ Erro ao adicionar membros ao grupo: $e');
+      rethrow;
+    }
+  }
+
+  Future<bool> isUserInGroup(String conversationId, String userId) async {
+    try {
+      final response = await _client
+          .from('participants')
+          .select()
+          .eq('conversation_id', conversationId)
+          .eq('user_id', userId)
+          .maybeSingle();
+
+      return response != null;
+    } catch (e) {
+      print('❌ Erro ao verificar participação do usuário: $e');
+      return false;
+    }
+  }
+
+  Future<List<AppUser>> getAvailableUsers(String conversationId) async {
+    try {
+      // Primeiro, busca os participantes atuais do grupo
+      final currentParticipants = await _client
+          .from('participants')
+          .select('user_id')
+          .eq('conversation_id', conversationId);
+
+      final currentUserIds = currentParticipants
+          .map<String>((p) => p['user_id'] as String)
+          .toList();
+
+      // Busca todos os usuários exceto os que já estão no grupo
+      final allUsers =
+          await _client.from('profiles').select().order('full_name');
+
+      return allUsers
+          .where((user) => !currentUserIds.contains(user['id'] as String))
+          .map<AppUser>((u) => AppUser.fromMap(u))
+          .toList();
+    } catch (e) {
+      print('❌ Erro ao buscar usuários disponíveis: $e');
+      return [];
+    }
+  }
+
   Future<void> addReaction(
       String messageId, String userId, String emoji) async {
     try {
       print('😊 Adicionando reação: $emoji à mensagem: $messageId');
 
-      await _client.rpc('add_message_reaction', params: {
-        'p_message_id': messageId,
-        'p_user_id': userId,
-        'p_emoji': emoji,
-      });
+      // Verifica se já existe uma reação igual do mesmo usuário
+      final existingReaction = await _client
+          .from('message_reactions')
+          .select()
+          .eq('message_id', messageId)
+          .eq('user_id', userId)
+          .eq('emoji', emoji)
+          .maybeSingle();
 
-      print('✅ Reação adicionada via função');
+      if (existingReaction != null) {
+        // Se já existe, remove a reação (toggle)
+        await _client
+            .from('message_reactions')
+            .delete()
+            .eq('id', existingReaction['id'] as String);
+        print('🗑️ Reação removida (toggle)');
+      } else {
+        // Se não existe, adiciona a reação
+        await _client.from('message_reactions').insert({
+          'id': _uuid.v4(),
+          'message_id': messageId,
+          'user_id': userId,
+          'emoji': emoji,
+          'created_at': DateTime.now().toUtc().toIso8601String(),
+        });
+        print('✅ Reação adicionada');
+      }
 
       notifyListeners();
     } catch (e) {
-      print('❌ Erro ao adicionar reação: $e');
+      print('❌ Erro ao adicionar/remover reação: $e');
       rethrow;
+    }
+  }
+
+  Future<List<AppUser>> getAllUsers() async {
+    try {
+      final data = await _client.from('profiles').select().order('full_name');
+
+      return data.map<AppUser>((u) {
+        // ✅ CORREÇÃO: Tratamento seguro para campos null
+        return AppUser(
+          id: u['id'] as String? ?? '', // ✅ Evita erro de null
+          email: u['email'] as String? ?? '',
+          fullName: u['full_name'] as String?,
+          avatarUrl: u['avatar_url'] as String?,
+          online: u['online'] as bool? ?? false,
+          lastSeen: u['last_seen'] != null
+              ? DateTime.tryParse(u['last_seen'] as String)
+              : null,
+        );
+      }).toList();
+    } catch (e) {
+      print("❌ Erro ao buscar usuários: $e");
+      return [];
     }
   }
 
@@ -250,6 +436,7 @@ class ChatService extends ChangeNotifier {
       await _client.from('message_reactions').delete().eq('id', reactionId);
 
       print('✅ Reação removida com sucesso');
+      notifyListeners();
     } catch (e) {
       print('❌ Erro ao remover reação: $e');
       rethrow;
@@ -275,6 +462,7 @@ class ChatService extends ChangeNotifier {
       await _client.from('messages').update(updateData).eq('id', messageId);
 
       print('✅ Mensagem editada com sucesso');
+      notifyListeners();
     } catch (e) {
       print('❌ Erro ao editar mensagem: $e');
       rethrow;
@@ -288,7 +476,6 @@ class ChatService extends ChangeNotifier {
       await _client.from('messages').delete().eq('id', messageId);
 
       print('✅ Mensagem excluída com sucesso');
-
       notifyListeners();
     } catch (e) {
       print('❌ Erro ao excluir mensagem: $e');
@@ -319,6 +506,17 @@ class ChatService extends ChangeNotifier {
       print('🆕 Criando conversa: $name');
       print('👥 Participantes: $participantIds');
 
+      // ✅ CORREÇÃO: Verifica se já existe conversa com esses participantes
+      if (!isGroup && participantIds.length == 1) {
+        // Para conversas 1:1, verifica se já existe
+        final existingConversation = await _findExistingConversation(
+            currentUserId, participantIds.first);
+        if (existingConversation != null) {
+          print('✅ Conversa já existe: $existingConversation');
+          return existingConversation;
+        }
+      }
+
       await _client.from('conversations').insert({
         'id': conversationId,
         'name': name,
@@ -328,13 +526,25 @@ class ChatService extends ChangeNotifier {
         'created_at': DateTime.now().toUtc().toIso8601String(),
       });
 
-      for (final userId in participantIds) {
-        await _client.from('participants').insert({
-          'id': _uuid.v4(),
-          'conversation_id': conversationId,
-          'user_id': userId,
-          'joined_at': DateTime.now().toUtc().toIso8601String(),
-        });
+      // ✅ CORREÇÃO: Remove duplicatas e adiciona criador
+      final allParticipants = {...participantIds, currentUserId}.toList();
+
+      for (final userId in allParticipants) {
+        try {
+          await _client.from('participants').insert({
+            'id': _uuid.v4(),
+            'conversation_id': conversationId,
+            'user_id': userId,
+            'joined_at': DateTime.now().toUtc().toIso8601String(),
+          });
+        } catch (e) {
+          // Ignora erro de duplicação (usuário já está no grupo)
+          if (e.toString().contains('duplicate key')) {
+            print('⚠️ Usuário $userId já está na conversa');
+            continue;
+          }
+          rethrow;
+        }
       }
 
       await sendTextMessage(conversationId, currentUserId,
@@ -348,14 +558,33 @@ class ChatService extends ChangeNotifier {
     }
   }
 
-  void refreshMessages() {
-    print('🔄 Forçando atualização das mensagens...');
-    notifyListeners();
-  }
+// ✅ NOVO MÉTODO: Encontrar conversa existente para 1:1
+  Future<String?> _findExistingConversation(String user1, String user2) async {
+    try {
+      final response = await _client
+          .from('participants')
+          .select('conversation_id')
+          .inFilter('user_id', [user1, user2]).eq(
+              'conversations.is_group', false);
 
-  @override
-  void dispose() {
-    _messagesSub?.cancel();
-    super.dispose();
+      // Agrupa por conversation_id e conta participantes
+      final conversationCounts = <String, int>{};
+      for (final participant in response) {
+        final convId = participant['conversation_id'] as String;
+        conversationCounts[convId] = (conversationCounts[convId] ?? 0) + 1;
+      }
+
+      // Encontra conversas com exatamente 2 participantes (1:1)
+      for (final entry in conversationCounts.entries) {
+        if (entry.value == 2) {
+          return entry.key;
+        }
+      }
+
+      return null;
+    } catch (e) {
+      print('❌ Erro ao buscar conversa existente: $e');
+      return null;
+    }
   }
 }

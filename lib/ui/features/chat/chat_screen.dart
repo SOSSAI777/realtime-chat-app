@@ -3,14 +3,18 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../services/chat_service.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/presence_service.dart';
 import '../../../ui/widgets/message_bubble.dart';
 import '../../../models/message_model.dart';
+import '../../../models/user_models.dart';
 
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key});
+  final String conversationId;
+  
+  const ChatScreen({super.key, required this.conversationId});
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -18,7 +22,6 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   String _formatTime(DateTime date) {
-    // Converter para horário local
     final localDate = date.toLocal();
     return '${localDate.hour.toString().padLeft(2, '0')}:${localDate.minute.toString().padLeft(2, '0')}';
   }
@@ -49,6 +52,8 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _isTyping = false;
   final Map<String, String> _typingUsers = {};
 
+  ChatService get _chatService => Provider.of<ChatService>(context, listen: false);
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -56,9 +61,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _initializeChat() async {
-    final args =
-        ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>?;
-    _conversationId = args?['conversationId'] ?? '';
+    _conversationId = widget.conversationId;
 
     if (_conversationId.isNotEmpty) {
       await _loadInitialMessages();
@@ -67,25 +70,99 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  void _openAddUserModal() async {
+    try {
+      final users = await _chatService.getAllUsers();
+
+      if (!mounted) return;
+      
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.white,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
+        ),
+        builder: (context) {
+          return SizedBox(
+            height: 450,
+            child: Column(
+              children: [
+                const SizedBox(height: 10),
+                const Text(
+                  "Adicionar participante",
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                Expanded(
+                  child: users.isEmpty
+                      ? const Center(child: Text('Nenhum usuário disponível'))
+                      : ListView.builder(
+                          itemCount: users.length,
+                          itemBuilder: (_, i) {
+                            final user = users[i];
+
+                            return ListTile(
+                              leading: CircleAvatar(
+                                backgroundImage: user.avatarUrl != null
+                                    ? NetworkImage(user.avatarUrl!)
+                                    : null,
+                                child: user.avatarUrl == null
+                                    ? const Icon(Icons.person)
+                                    : null,
+                              ),
+                              title: Text(user.fullName ?? user.email),
+                              subtitle: Text(user.email),
+                              onTap: () async {
+                                try {
+                                  await _chatService.addUserToGroup(
+                                      _conversationId, user.id);
+                                  if (mounted) {
+                                    Navigator.pop(context);
+                                    _showSuccessSnackbar('Usuário adicionado ao grupo!');
+                                  }
+                                } catch (e) {
+                                  if (mounted) {
+                                    _showErrorSnackbar('Erro ao adicionar usuário: $e');
+                                  }
+                                }
+                              },
+                            );
+                          },
+                        ),
+                )
+              ],
+            ),
+          );
+        },
+      );
+    } catch (e) {
+      if (mounted) {
+        _showErrorSnackbar('Erro ao carregar usuários: $e');
+      }
+    }
+  }
+
   Future<void> _loadInitialMessages() async {
     try {
       final chatService = Provider.of<ChatService>(context, listen: false);
       final messages = await chatService.fetchMessages(_conversationId);
 
-      setState(() {
-        _messages = messages;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _messages = messages;
+          _isLoading = false;
+        });
+      }
 
       _scrollToBottom();
     } catch (e) {
       print('❌ Erro ao carregar mensagens: $e');
       if (mounted) {
         _showErrorSnackbar('Erro ao carregar mensagens');
+        setState(() {
+          _isLoading = false;
+        });
       }
-      setState(() {
-        _isLoading = false;
-      });
     }
   }
 
@@ -99,26 +176,22 @@ class _ChatScreenState extends State<ChatScreen> {
       (newMessages) {
         print('🔄 Subscription atualizada: ${newMessages.length} mensagens');
 
-        final currentMessageIds = _messages.map((m) => m.id).toSet();
-        final newMessageIds = newMessages.map((m) => m.id).toSet();
-        final removedMessageIds = currentMessageIds.difference(newMessageIds);
-
-        if (removedMessageIds.isNotEmpty) {
-          print('🗑️ Mensagens removidas na subscription: $removedMessageIds');
+        if (mounted) {
+          setState(() {
+            _messages = newMessages;
+          });
         }
-
-        setState(() {
-          _messages = newMessages;
-        });
 
         _scrollToBottom();
       },
       onError: (error) {
         print('❌ Erro na subscription: $error');
-        _showErrorSnackbar('Erro na conexão em tempo real');
+        if (mounted) {
+          _showErrorSnackbar('Erro na conexão em tempo real');
+        }
 
         Future.delayed(const Duration(seconds: 3), () {
-          if (_conversationId.isNotEmpty) {
+          if (_conversationId.isNotEmpty && mounted) {
             _subscribeToMessages();
           }
         });
@@ -135,12 +208,14 @@ class _ChatScreenState extends State<ChatScreen> {
     _typingSubscription =
         presenceService.subscribeToTyping(_conversationId).listen(
       (typingEvents) {
-        setState(() {
-          _typingUsers.clear();
-          for (final event in typingEvents) {
-            _typingUsers[event['user_id']] = event['user_name'] ?? 'Usuário';
-          }
-        });
+        if (mounted) {
+          setState(() {
+            _typingUsers.clear();
+            for (final event in typingEvents) {
+              _typingUsers[event['user_id']] = event['user_name'] ?? 'Usuário';
+            }
+          });
+        }
       },
     );
   }
@@ -239,7 +314,6 @@ class _ChatScreenState extends State<ChatScreen> {
       );
 
       if (image != null) {
-        // ✅ CORREÇÃO: Converter para Uint8List regular
         final List<int> imageBytes = await image.readAsBytes();
         final Uint8List bytes = Uint8List.fromList(imageBytes);
 
@@ -265,9 +339,11 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _removeMessageLocally(String messageId) {
-    setState(() {
-      _messages.removeWhere((message) => message.id == messageId);
-    });
+    if (mounted) {
+      setState(() {
+        _messages.removeWhere((message) => message.id == messageId);
+      });
+    }
   }
 
   Future<void> _forceRefreshMessages() async {
@@ -280,7 +356,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final auth = Provider.of<AuthService>(context, listen: false);
     final isMyMessage = message.senderId == auth.currentUser?.id;
     final canEdit = isMyMessage &&
-        DateTime.now().difference(message.createdAt).inMinutes <= 4;
+        DateTime.now().difference(message.createdAt).inMinutes <= 5;
 
     showModalBottomSheet(
       context: context,
@@ -358,8 +434,6 @@ class _ChatScreenState extends State<ChatScreen> {
                   _loadInitialMessages();
 
                   if (!context.mounted) return;
-
-                  if (!mounted) return;
                   Navigator.pop(context);
                   _showSuccessSnackbar('Mensagem editada');
                 } catch (e) {
@@ -452,8 +526,6 @@ class _ChatScreenState extends State<ChatScreen> {
                         _loadInitialMessages();
 
                         if (!context.mounted) return;
-
-                        if (!mounted) return;
                         Navigator.pop(context);
                         _showSuccessSnackbar('Reação adicionada!');
                       } catch (e) {
@@ -498,8 +570,6 @@ class _ChatScreenState extends State<ChatScreen> {
                 _loadInitialMessages();
 
                 if (!context.mounted) return;
-
-                if (!mounted) return;
                 Navigator.pop(context);
                 _showSuccessSnackbar('Reação removida');
               } catch (e) {
@@ -538,7 +608,8 @@ class _ChatScreenState extends State<ChatScreen> {
             if (_typingUsers.isNotEmpty)
               Text(
                 '${_typingUsers.values.join(', ')} ${_typingUsers.length == 1 ? 'está' : 'estão'} digitando...',
-                style: const TextStyle(fontSize: 12, color: Color.fromARGB(179, 0, 3, 14)),
+                style: const TextStyle(
+                    fontSize: 12, color: Color.fromARGB(179, 0, 3, 14)),
               ),
           ],
         ),
@@ -546,9 +617,11 @@ class _ChatScreenState extends State<ChatScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: () {
-              _forceRefreshMessages();
-            },
+            onPressed: _forceRefreshMessages,
+          ),
+          IconButton(
+            icon: const Icon(Icons.group_add),
+            onPressed: _openAddUserModal,
           ),
         ],
       ),
@@ -594,7 +667,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
                             bool showDate = false;
                             if (i == 0) {
-                              // Primeira mensagem na lista (mais recente) sempre mostra data
                               showDate = true;
                             } else {
                               final previousMessage = _messages[i - 1];
@@ -613,7 +685,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
                             return Column(
                               children: [
-                                // ✅ A data deve vir ANTES da mensagem
                                 if (showDate)
                                   Padding(
                                     padding: const EdgeInsets.symmetric(
@@ -710,6 +781,82 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class AddMembersDialog extends StatelessWidget {
+  final String conversationId;
+  final VoidCallback onMembersAdded;
+
+  const AddMembersDialog({
+    super.key,
+    required this.conversationId,
+    required this.onMembersAdded,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final chatService = Provider.of<ChatService>(context, listen: false);
+
+    return FutureBuilder<List<AppUser>>(
+      future: chatService.getAllUsers(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        } else if (snapshot.hasError) {
+          return Center(
+              child: Text('Erro ao carregar usuários: ${snapshot.error}'));
+        } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          return const Center(child: Text('Nenhum usuário disponível'));
+        }
+
+        final users = snapshot.data!;
+
+        return AlertDialog(
+          title: Text('Adicionar Membros ao Grupo'),
+          content: SizedBox(
+            height: 400,
+            width: 300,
+            child: ListView.builder(
+              itemCount: users.length,
+              itemBuilder: (_, i) {
+                final user = users[i];
+
+                return ListTile(
+                  leading: CircleAvatar(
+                    backgroundImage: user.avatarUrl != null
+                        ? NetworkImage(user.avatarUrl!)
+                        : null,
+                    child: user.avatarUrl == null
+                        ? const Icon(Icons.person)
+                        : null,
+                  ),
+                  title: Text(user.fullName ?? user.email),
+                  subtitle: Text(user.email),
+                  onTap: () async {
+                    try {
+                      await chatService.addUserToGroup(conversationId, user.id);
+                      onMembersAdded();
+                      Navigator.pop(context);
+                    } catch (e) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Erro ao adicionar usuário: $e')),
+                      );
+                    }
+                  },
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancelar'),
+            ),
+          ],
+        );
+      },
     );
   }
 }

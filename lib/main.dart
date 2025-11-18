@@ -17,9 +17,7 @@ import 'services/storage_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
   await SupabaseConfig.init();
-
   runApp(MyApp());
 }
 
@@ -46,13 +44,47 @@ class MyApp extends StatelessWidget {
         home: LoginScreen(),
         debugShowCheckedModeBanner: false,
         routes: {
-          '/login': (_) => LoginScreen(),
-          '/register': (_) => RegisterScreen(),
-          '/forgot-password': (_) => const ForgotPasswordScreen(),
-          '/home': (_) => const HomeScreen(),
-          '/chat': (_) => const ChatScreen(),
-          '/edit-profile': (_) => const EditProfileScreen(),
-          '/search': (_) => const SearchScreen(),
+          '/login': (context) => LoginScreen(),
+          '/register': (context) => RegisterScreen(),
+          '/forgot-password': (context) => ForgotPasswordScreen(),
+          '/home': (context) =>
+              HomeScreen(), // ✅ CORRIGIDO - HomeScreen deve existir
+          '/edit-profile': (context) => EditProfileScreen(),
+          '/search': (context) => SearchScreen(),
+        },
+        onGenerateRoute: (settings) {
+          // Rota dinâmica para ChatScreen
+          if (settings.name == '/chat') {
+            final args = settings.arguments as Map<String, dynamic>?;
+            final conversationId = args?['conversationId'] as String? ?? '';
+
+            return MaterialPageRoute(
+              builder: (context) => ChatScreen(conversationId: conversationId),
+            );
+          }
+          return null;
+        },
+        onUnknownRoute: (settings) {
+          // ✅ ADICIONADO - Para rotas desconhecidas
+          return MaterialPageRoute(
+            builder: (context) => Scaffold(
+              appBar: AppBar(title: Text('Página não encontrada')),
+              body: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text('Página ${settings.name} não encontrada'),
+                    SizedBox(height: 20),
+                    ElevatedButton(
+                      onPressed: () => Navigator.pushNamedAndRemoveUntil(
+                          context, '/login', (route) => false),
+                      child: Text('Voltar para Login'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
         },
       ),
     );
