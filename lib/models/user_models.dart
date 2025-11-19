@@ -17,13 +17,20 @@ class AppUser {
 
   factory AppUser.fromMap(Map<String, dynamic> map) {
     return AppUser(
-      id: map['id'] as String,
-      email: map['email'] as String,
+      // ✅ CORREÇÃO: Proteção contra nulos
+      // Se 'id' vier nulo, converte para string vazia.
+      id: map['id']?.toString() ?? '', 
+      
+      // Se 'email' vier nulo, coloca um texto padrão
+      email: map['email']?.toString() ?? 'Sem email',
+      
       fullName: map['full_name'] as String?,
       avatarUrl: map['avatar_url'] as String?,
       online: map['online'] as bool? ?? false,
+      
+      // ✅ CORREÇÃO: DateTime.tryParse é mais seguro que parse
       lastSeen: map['last_seen'] != null 
-          ? DateTime.parse(map['last_seen'] as String)
+          ? DateTime.tryParse(map['last_seen'].toString()) 
           : null,
     );
   }
