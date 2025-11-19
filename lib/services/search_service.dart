@@ -4,13 +4,27 @@ import '../core/supabase_config.dart';
 class SearchService {
   final SupabaseClient _client = SupabaseConfig.client;
 
-  Future<List<Map<String, dynamic>>> searchUsers(String query) async {
+  /// Busca usuários por nome ou email, permitindo excluir uma lista de IDs (ex: membros do grupo)
+  Future<List<Map<String, dynamic>>> searchUsers(
+    String query, {
+    List<String> excludeUserIds = const [], // ✅ Parâmetro novo adicionado
+  }) async {
     try {
-      final response = await _client
+      // Cria o filtro de busca: nome OU email contendo o texto pesquisado
+      final searchFilter = "full_name.ilike.%$query%,email.ilike.%$query%";
+      
+      var queryBuilder = _client
           .from('profiles')
           .select()
-          .ilike('full_name', '%$query%')
-          .limit(10);
+          .or(searchFilter);
+
+      // ✅ Aplica o filtro de exclusão se houver IDs na lista
+      if (excludeUserIds.isNotEmpty) {
+        // Exclui usuários cujo ID esteja na lista 'excludeUserIds'
+        queryBuilder = queryBuilder.not('id', 'in', excludeUserIds);
+      }
+
+      final response = await queryBuilder.limit(10);
       
       return (response as List<dynamic>).cast<Map<String, dynamic>>();
     } catch (e) {

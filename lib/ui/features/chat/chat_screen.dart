@@ -6,6 +6,8 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../services/chat_service.dart';
 import '../../../services/auth_service.dart';
+// [ALTERAÇÃO]: Mantendo o import da nova tela
+import '../../../ui/features/chat/add_participant_screen.dart'; 
 import '../../../services/presence_service.dart';
 import '../../../ui/widgets/message_bubble.dart';
 import '../../../models/message_model.dart';
@@ -21,6 +23,7 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
+  // [SEUS MÉTODOS DE FORMATAÇÃO]
   String _formatTime(DateTime date) {
     final localDate = date.toLocal();
     return '${localDate.hour.toString().padLeft(2, '0')}:${localDate.minute.toString().padLeft(2, '0')}';
@@ -41,6 +44,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  // [SUAS VARIÁVEIS DE ESTADO]
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final ImagePicker _imagePicker = ImagePicker();
@@ -70,76 +74,15 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  // [MODIFICAÇÃO ESSENCIAL]: Substitui a lógica antiga do modal pela navegação para a nova tela.
   void _openAddUserModal() async {
-    try {
-      final users = await _chatService.getAllUsers();
-
-      if (!mounted) return;
-      
-      showModalBottomSheet(
-        context: context,
-        backgroundColor: Colors.white,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => AddParticipantScreen(
+          conversationId: _conversationId,
         ),
-        builder: (context) {
-          return SizedBox(
-            height: 450,
-            child: Column(
-              children: [
-                const SizedBox(height: 10),
-                const Text(
-                  "Adicionar participante",
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 10),
-                Expanded(
-                  child: users.isEmpty
-                      ? const Center(child: Text('Nenhum usuário disponível'))
-                      : ListView.builder(
-                          itemCount: users.length,
-                          itemBuilder: (_, i) {
-                            final user = users[i];
-
-                            return ListTile(
-                              leading: CircleAvatar(
-                                backgroundImage: user.avatarUrl != null
-                                    ? NetworkImage(user.avatarUrl!)
-                                    : null,
-                                child: user.avatarUrl == null
-                                    ? const Icon(Icons.person)
-                                    : null,
-                              ),
-                              title: Text(user.fullName ?? user.email),
-                              subtitle: Text(user.email),
-                              onTap: () async {
-                                try {
-                                  await _chatService.addUserToGroup(
-                                      _conversationId, user.id);
-                                  if (mounted) {
-                                    Navigator.pop(context);
-                                    _showSuccessSnackbar('Usuário adicionado ao grupo!');
-                                  }
-                                } catch (e) {
-                                  if (mounted) {
-                                    _showErrorSnackbar('Erro ao adicionar usuário: $e');
-                                  }
-                                }
-                              },
-                            );
-                          },
-                        ),
-                )
-              ],
-            ),
-          );
-        },
-      );
-    } catch (e) {
-      if (mounted) {
-        _showErrorSnackbar('Erro ao carregar usuários: $e');
-      }
-    }
+      ),
+    );
   }
 
   Future<void> _loadInitialMessages() async {
@@ -621,7 +564,7 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.group_add),
-            onPressed: _openAddUserModal,
+            onPressed: _openAddUserModal, // Chama o método modificado
           ),
         ],
       ),
@@ -781,82 +724,6 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ],
       ),
-    );
-  }
-}
-
-class AddMembersDialog extends StatelessWidget {
-  final String conversationId;
-  final VoidCallback onMembersAdded;
-
-  const AddMembersDialog({
-    super.key,
-    required this.conversationId,
-    required this.onMembersAdded,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final chatService = Provider.of<ChatService>(context, listen: false);
-
-    return FutureBuilder<List<AppUser>>(
-      future: chatService.getAllUsers(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        } else if (snapshot.hasError) {
-          return Center(
-              child: Text('Erro ao carregar usuários: ${snapshot.error}'));
-        } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-          return const Center(child: Text('Nenhum usuário disponível'));
-        }
-
-        final users = snapshot.data!;
-
-        return AlertDialog(
-          title: Text('Adicionar Membros ao Grupo'),
-          content: SizedBox(
-            height: 400,
-            width: 300,
-            child: ListView.builder(
-              itemCount: users.length,
-              itemBuilder: (_, i) {
-                final user = users[i];
-
-                return ListTile(
-                  leading: CircleAvatar(
-                    backgroundImage: user.avatarUrl != null
-                        ? NetworkImage(user.avatarUrl!)
-                        : null,
-                    child: user.avatarUrl == null
-                        ? const Icon(Icons.person)
-                        : null,
-                  ),
-                  title: Text(user.fullName ?? user.email),
-                  subtitle: Text(user.email),
-                  onTap: () async {
-                    try {
-                      await chatService.addUserToGroup(conversationId, user.id);
-                      onMembersAdded();
-                      Navigator.pop(context);
-                    } catch (e) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Erro ao adicionar usuário: $e')),
-                      );
-                    }
-                  },
-                );
-              },
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('Cancelar'),
-            ),
-          ],
-        );
-      },
     );
   }
 }
